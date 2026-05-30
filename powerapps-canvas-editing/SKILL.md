@@ -1,0 +1,201 @@
+---
+name: powerapps-canvas-editing
+description: >
+  Edit Microsoft Power Apps canvas apps as source (.fx.yaml / .pa.yaml) and ship them
+  as importable solution .zip files, entirely offline with the pac CLI — no tenant
+  connection. Use this when asked to fix or add screens/controls/Power Fx in a Power
+  Platform canvas app, repackage a solution, or debug why a re-imported app "didn't
+  change" or shows blank/empty screens in Studio. Covers the non-obvious traps:
+  three-stamp version bumping, gallery Layout, searchable ComboBox SearchItems,
+  %RESERVED% enum tokens, and the ConnectionReferences import gate.
+---
+
+# Editing Power Apps Canvas Solutions (offline, pac CLI)
+
+This skill is for editing a Power Apps **canvas** app by hand-editing its source YAML and
+re-packing it into an importable **solution `.zip`** — without ever touching the live
+tenant. The maker (a person) imports the resulting `.zip` in the Power Platform maker
+portal. You produce the artifact; you do not deploy it.
+
+It encodes a set of traps that each cost real debugging time. Read "Critical traps" before
+shipping anything — most of them fail **silently** (the import succeeds, the app just
+doesn't change or renders blank).
+
+## What you need
+
+- **`pac` CLI** (Power Platform CLI). Verify with `pac help`. Version pinned in our
+  environment is **1.34.4** (later Linux builds shipped a broken nupkg). No login is
+  required for `pac canvas pack` / `unpack` — they are pure local file operations.
+- **`python3` + `pyyaml`** if you use the bundled `pa_to_fx.py` converter.
+- **`zip`** for repackaging (or use the bundled `bump_and_repack.py`).
+
+## The two source formats — know which one you're editing
+
+| Format | File | What it is | Who reads it |
+|---|---|---|---|
+| **Modern** | `*.fx.yaml` | The format `pac canvas pack` consumes directly | `pac canvas pack` |
+| **Old / source-control** | `*.pa.yaml` | Human-friendlier; **NOT** consumed by pack as-is | conversion step only |
+
+`*.pa.yaml` files that live *inside* an `.msapp` (under `Other/Src/`) are **source-control
+artifacts only** — Studio ignores them. If a screen exists only as `.pa.yaml` and never gets
+converted+packed, **Studio shows a blank app with no screens.** Studio actually renders from
+`Controls\*.json` inside the msapp, which `pac canvas pack` generates from `Src/*.fx.yaml`.
+
+**Decide before editing:** if a screen has a `Src/<Screen>.fx.yaml`, edit that directly. If it
+only has `Other/Src/<Screen>.pa.yaml`, edit the `.pa.yaml` then run the converter
+(`scripts/pa_to_fx.py`) to (re)generate the `.fx.yaml`. Don't mix — pick the one that drives
+the pack.
+
+## The pipeline
+
+```
+edit Src/*.fx.yaml            (or edit Other/Src/*.pa.yaml → pa_to_fx.py → Src/*.fx.yaml)
+   → pac canvas pack          (writes a fresh .msapp; Controls\*.json = what Studio shows)
+   → swap .msapp into the solution wrapper (CanvasApps/)
+   → bump ALL THREE version stamps  (see Critical trap #1)
+   → re-zip preserving structure (no parent folder)
+   → maker imports the .zip via Solutions → Import
+```
+
+A canvas app distributed as a **solution** is a `.zip` with this shape (flat at the root —
+**no wrapping parent folder**):
+
+```
+[Content_Types].xml
+solution.xml
+customizations.xml
+CanvasApps/<AppName>_DocumentUri.msapp   ← the packed app
+Workflows/<flow>.json                    ← present only if the solution has flows
+```
+
+## Workflow
+
+1. **Unpack to inspect (optional).** `pac canvas unpack --msapp app.msapp --sources ./_unpacked`
+   gives you `Src/*.fx.yaml` + `Connections/`, `DataSources/`, `pkgs/`, etc. ⚠️ unpack is
+   **lossy** — see trap #3 (it silently strips `IsSearchable`/`SearchItems`). Prefer editing a
+   git-tracked source tree over round-tripping through unpack.
+2. **Edit the `.fx.yaml`** (or `.pa.yaml` + convert). Keep control declarations as
+   `Name As <type>:` with `Properties` as `Key: =Formula` lines. Each control needs a `ZIndex`.
+3. **Pack:** `pac canvas pack --msapp out.msapp --sources ./_unpacked`. Exit 0 with only a
+   checksum-mismatch warning is normal. Any `PA****` error is a real Power Fx / structure
+   problem — fix it before proceeding.
+4. **Repackage the solution zip** and **bump all three stamps** —
+   use `scripts/bump_and_repack.py` (does both) or do it by hand per trap #1.
+5. **Hand off.** Tell the maker the exact filename and that it imports via
+   **Solutions → Import** (unmanaged). You never import it yourself.
+
+## Critical traps (each fails silently — read before shipping)
+
+### 1. A re-import "does nothing" unless you bump THREE stamps
+Power Platform dedups the canvas app by version. Bumping the solution `<Version>` alone makes
+the **solution** version tick up while Studio **silently keeps the old app**. You must bump
+**all three**, every build:
+
+1. `solution.xml` → `<Version>` (e.g. `0.0.0.18`)
+2. `customizations.xml` → `<AppVersion>` → a **new** ISO timestamp `YYYY-MM-DDThh:mm:ssZ`
+3. `customizations.xml` → `sienaVersion` inside `<Tags>` → `YYYYMMDDThhmmssZ-<clientver>`
+   (keep the existing `-<clientver>` suffix; only change the timestamp)
+
+The `.msapp` bytes and its internal `Header.json` DocVersion are **not** the import gate.
+`bump_and_repack.py` handles all three.
+
+### 2. Galleries must set `Layout: =Layout.Vertical`
+`pac canvas pack` defaults an absent gallery `Layout` to `Layout.Horizontal` (+ `WrapCount: 1`),
+even for a `BrowseLayout_Vertical_*` variant. A horizontal gallery sizes each item
+`TemplateSize`-px **wide** / full-height — the list renders as a tall narrow strip and any
+template control positioned past `TemplateSize` (e.g. a label at `X:103`) is **clipped**. It
+looks like an empty-data or binding bug but is purely the wrong layout. **Always set
+`Layout: =Layout.Vertical` explicitly** on every gallery. (`pa_to_fx.py` injects it
+automatically.) Verify: each gallery rule in `Controls\*.json` reads `Layout=Layout.Vertical`.
+
+### 3. A searchable classic ComboBox needs a `SearchItems` rule — and unpack strips it
+A classic `ComboBox@2.4.0` with `IsSearchable: =true` populates its dropdown from
+**`SearchItems`**, NOT `Items`. With `SearchItems` absent, the dropdown shows **no options**.
+Worse: **`pac canvas unpack` silently drops both `IsSearchable` AND `SearchItems`** from the
+regenerated YAML — so a working control and a broken one look identical in source, and any
+unpack→pack round-trip silently re-breaks it. `pac pack` *does* honor both when present.
+
+Author all of these on every searchable combo:
+```yaml
+IsSearchable: =true
+SearchFields: =["Col"]
+DisplayFields: =["Col"]
+SearchItems: =Search(Sort(<Source>, <Col>), <SelfName>.SearchText, <Col>)
+```
+For a custom-query picker (e.g. an Office365Users people picker), set `SearchItems` to the
+**same expression as `Items`**. After **any** `pac unpack`, re-add these to every searchable combo.
+
+**Two ComboBox template defaults that error/mislead in a real app — set them explicitly:**
+- `DefaultSelectedItems` template default is **`First(ComboBoxSample)`**, referencing a sample data
+  source that doesn't exist in your app, so an unset combo shows a red error in Studio. Set it
+  explicitly to **`=Blank()`** for "no default selection" (it's an Array/table-typed property —
+  `""` would itself raise a type error). Use `=LookUp(<Source>, <key> = <var>.<key>)` to pre-select
+  on edit.
+- `InputTextPlaceholder` template default is a localized "find items" hint. For a **filter** combo,
+  set it to the category it filters (e.g. `="Departments"`) so the empty control reads as a labeled
+  filter instead of generic placeholder text. Apply this convention to every filter dropdown.
+
+### 4. Never write `%Enum.RESERVED%` tokens in an instance formula
+`%DisplayMode.RESERVED%.Edit`, `%DateTimeZone.RESERVED%.Local`,
+`%DateTimeFormat.RESERVED%.ShortDate`, `%StartOfWeek.RESERVED%.Sunday` etc. are **control-
+template default placeholders** — valid only inside `pkgs/*.xml` and `Src/Themes.json`. In a
+control instance's property they are **not** valid Power Fx. `pac pack` passes them through
+unvalidated, then Studio raises `Expected operator…` and **refuses to Publish**. Use the plain
+enum: `DisplayMode.Edit`, `DateTimeZone.Local`, etc.
+Guard before packing:
+```
+grep -rE "%[A-Za-z]+\.RESERVED%" _unpacked/Src   # must be empty
+```
+(Hits in `pkgs/` and `Themes.json` are expected — leave those alone.)
+
+### 5. `<ConnectionReferences>` is the import-time connection-binding gate
+On import, Power Platform binds connections **only** for the data sources listed in the
+solution `customizations.xml` `<ConnectionReferences>` JSON. Studio's export writes only the
+data sources that existed at the app's *original* creation — anything added later (and service
+connectors like Office 365 Users) is **omitted**, so it imports as "Not connected" even though
+the msapp's `Connections.json` maps it correctly. Re-adding it in Studio does not survive the
+next export.
+
+Fix: regenerate `<ConnectionReferences>` from the app's own `Connections/Connections.json` —
+one entry per connection (`id`/`displayName`/`iconUri`), the full `dataSources[]` array, and
+`dataSets:{<siteUrl>:{dataSources:{<name>:{tableName}}}}` for SharePoint (`dataSets:{}` for
+service connectors). The complete msapp `DataSources.json` is necessary but **not** sufficient —
+the solution wrapper is the gate.
+
+### 6. The datepicker can't be re-nulled, and defaults to Today()
+A classic `datepicker_2.6.0` ships `DefaultDate="Today()"`, so an "optional" end-date control
+is **never blank** and always writes a value. Worse, once a user picks a date the classic
+control offers **no way to clear it back to null**. Standard workaround for an optional date:
+- Drive `DefaultDate` off a context flag: `=If(locCleared, Blank(), If(IsBlank(varEditing), Blank(), varEditing.SomeDate))`
+- Add a small clear icon: `OnSelect: =UpdateContext({ locCleared: true }); Reset(dpControl)`
+- Read it as `dpControl.SelectedDate` (blank = unset).
+- **Also set `InputTextPlaceholder: =""`.** The template default is
+  `If(IsBlank(Self.SelectedDate), Text(Date(2001,12,31), Self.Format, Self.Language))`, which
+  renders a misleading **`12/31/2001`** in the box when no date is selected — making an empty
+  optional date look populated. `""` makes the empty box actually look empty.
+
+### 7. `#` in formulas breaks `pac` 1.34.4
+`pac` 1.34.4 throws `PA3003` on **any** `#` in a formula — even inside a string literal
+(`"#Microsoft.Azure…"`, `"i:0#.f|membership|"`). Replace `"#foo"` with `Char(35) & "foo"`.
+(The `pa_to_fx.py` converter also rewrites leading-`#` YAML comment lines to Power Fx `//`.)
+
+## Bundled helpers (`scripts/`)
+
+- **`pa_to_fx.py`** — converts `Other/Src/*.pa.yaml` → `Src/*.fx.yaml`. Handles the flow-dict
+  expansion, `#`→`//` comment rewrite, single-line-formula quoting, injects
+  `Layout: =Layout.Vertical` into every gallery, and picks a `BrowseLayout_Vertical_*` variant
+  so template children land inside the gallery slot.
+  `python3 scripts/pa_to_fx.py <in_pa_dir> <out_fx_dir>`
+- **`bump_and_repack.py`** — bumps all three version stamps and re-zips a solution working dir
+  into an importable `.zip` with the correct flat structure. `python3 scripts/bump_and_repack.py --help`
+
+## Reference
+
+`reference/packaging-gotchas.md` — the same traps in long form plus the solution-zip anatomy,
+for when you need the full explanation rather than the checklist.
+
+## Hand-off discipline
+
+You author and pack; **the maker imports**. State clearly: the exact `.zip` filename, that it
+imports **unmanaged** via **Solutions → Import**, and a short verification checklist (App Checker
+clean, galleries vertical, combos populate, the specific screens you changed behave as intended).

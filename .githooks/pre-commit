@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Secret-scan pre-commit hook for the public claude-skills repo.
+# Blocks commits whose staged ADDED lines match high-confidence sensitive patterns,
+# so internal infrastructure details never leak into a public repo.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass a verified-clean commit:   git commit --no-verify
+set -euo pipefail
+
+# Patterns are intentionally high-confidence to minimize false positives.
+# label<TAB>regex (extended regex). Add project-specific patterns here as needed.
+patterns=(
+  $'private IP (192.168/10/172.16-31)\t(^|[^0-9.])(192\\.168|10)\\.[0-9]+\\.[0-9]+|(^|[^0-9.])172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]+\\.[0-9]+'
+  $'GitHub token\tgh[posru]_[A-Za-z0-9]{20,}'
+  $'private key block\tBEGIN ([A-Z]+ )?PRIVATE KEY'
+  $'AWS access key\tAKIA[0-9A-Z]{16}'
+  $'internal domain (bitz.dev)\tbitz\\.dev'
+  $'secret assignment\t(password|passwd|secret|api[_-]?key|access[_-]?token|MCP_API_KEY)["'\'' ]*[:=]["'\'' ]*[^"'\'' ]{6,}'
+)
+
+# Collect only the added lines in the staged diff (lines starting with '+', not the +++ header).
+added="$(git diff --cached --no-color -U0 -- ':(exclude).githooks/pre-commit' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+
+if [ -z "$added" ]; then
+  exit 0
+fi
+
+hits=0
+for entry in "${patterns[@]}"; do
+  label="${entry%%$'\t'*}"
+  regex="${entry#*$'\t'}"
+  matches="$(printf '%s\n' "$added" | grep -inE "$regex" || true)"
+  if [ -n "$matches" ]; then
+    if [ "$hits" -eq 0 ]; then
+      echo "✋ pre-commit: possible secret(s) in staged changes — commit blocked." >&2
+      echo >&2
+    fi
+    echo "  [$label]" >&2
+    printf '%s\n' "$matches" | sed 's/^/    /' >&2
+    hits=1
+  fi
+done
+
+if [ "$hits" -ne 0 ]; then
+  echo >&2
+  echo "If this is a false positive, re-run with:  git commit --no-verify" >&2
+  exit 1
+fi
+
+exit 0
