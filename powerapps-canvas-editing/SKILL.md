@@ -194,6 +194,12 @@ control offers **no way to clear it back to null**. Standard workaround for an o
 `reference/packaging-gotchas.md` — the same traps in long form plus the solution-zip anatomy,
 for when you need the full explanation rather than the checklist.
 
+`reference/authoring-and-layout-qa.md` — Power Fx YAML syntax traps (record-literal/colon
+quoting, enum escaping, lowercase date formats) and 10 layout self-QA checks the compiler can't
+catch (GroupContainer min-size, FillPortions, scroll/no-height traps, label wrap/padding).
+Distilled from Microsoft's official `power-platform-skills` canvas-apps plugin; toolchain-
+independent, so it applies to the `.fx.yaml` we author offline.
+
 ## Hand-off discipline
 
 You author and pack; **the maker imports**. State clearly: the exact `.zip` filename, that it
