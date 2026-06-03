@@ -179,6 +179,50 @@ control offers **no way to clear it back to null**. Standard workaround for an o
 (`"#Microsoft.Azure…"`, `"i:0#.f|membership|"`). Replace `"#foo"` with `Char(35) & "foo"`.
 (The `pa_to_fx.py` converter also rewrites leading-`#` YAML comment lines to Power Fx `//`.)
 
+### 8. A blank/new app has NO control templates — `pac pack` fails with `PA3001`
+A canvas app created **blank** (`AppCreationSource: AppFromScratch`) and exported before any
+real controls were added registers only `screen`/`Host`/`groupContainer` in
+`ControlTemplates.json`, with no control `*.xml` under `pkgs/`. Author screens that use
+`gallery`/`label`/`button`/`combobox`/… and `pac canvas pack` dies with
+`PA3001 Internal error. Object reference not set…` in `GalleryTemplateTransform.BeforeWrite`
+(gallery trips first; every unregistered control is affected). **Fix:** port the templates
+from a sibling app in the **same tenant + same source-format version** — merge the missing
+keys from its `ControlTemplates.json` and copy its `pkgs/*.xml` into the new app's `_unpacked/`.
+Guard before packing: `ControlTemplates.json` keys must include every control type you use.
+
+**Companion trap (same from-blank context): stale `Entropy/` → `ErrOpeningDocument`.** Hand-editing
+source (deleting the placeholder `Screen1`, adding screens) does **not** refresh `Entropy/Entropy.json`
++ `Entropy/checksum.json` — they stay keyed to the old controls. The msapp **packs and imports fine
+but won't open for edit in Studio** (`ErrOpeningDocument_UnknownError`). **Fix:** clean round-trip
+before shipping — `pac canvas pack` → `pac canvas unpack` (regenerates Entropy to match real
+controls) → **re-add `IsSearchable`+`SearchItems`** (unpack strips them, trap #3) → `pac canvas pack`.
+Guard: `grep -o Screen1 Entropy/Entropy.json` empty; your real screen names present.
+
+### 9. Multi-app solution — bump only the changed app's stamps
+When a solution holds two+ `<CanvasApp>` blocks, import dedups each app independently by its
+`AppVersion`+`sienaVersion`. To update one app and leave the other (e.g. a live, verified app)
+untouched: bump the solution `<Version>` + **only the target app's** `AppVersion`/`sienaVersion`,
+and keep the other app's msapp **byte-identical** (verify with md5). Isolate the target
+`<CanvasApp>` block with a **non-spanning** regex `<CanvasApp>(?:(?!</CanvasApp>).)*?</CanvasApp>`
+— a lazy `<CanvasApp>.*?Name.*?</CanvasApp>` silently spans into the next block and edits the
+wrong app.
+
+### 10. Layout: design for the device + anchor to `App.Width`/`App.Height`
+Pick the canvas size for the **target device** up front (`CanvasManifest.json`
+`DocumentLayoutWidth/Height`; desktop apps → `1920×1080`). Changing it later means rebasing
+every right-anchored control, so:
+- **Right-edge elements use `App.Width`** (`X: =App.Width - <offset>`, full-height panels
+  `Height: =App.Height`), never hard pixels tied to the old right edge — those float to the
+  middle on any other canvas size. Left-anchored content and full-screen forms stay put.
+- **A control's `Width` must fit its longest text** or it wraps/clips: a `toggleSwitch` wraps
+  `TrueText`/`FalseText` over its pill when too narrow (give ~240px + explicit `Height`); a
+  `dropdown`/`combobox` clips its selected item below the longest option width and must sit
+  clear of its own field label.
+- **Guard with a static geometry audit** (resolve each top-level control's
+  `X/Y/Width/Height`, flag `x+w>canvasW`, `y+h>canvasH`, foreground overlaps) before import —
+  the only pre-render check. It can't see `Visible`-gated overlaps, gallery-internal relative
+  layout, or in-control text wrapping; those still need a Studio/Preview eyeball.
+
 ## Bundled helpers (`scripts/`)
 
 - **`pa_to_fx.py`** — converts `Other/Src/*.pa.yaml` → `Src/*.fx.yaml`. Handles the flow-dict
