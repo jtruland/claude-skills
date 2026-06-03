@@ -9,9 +9,16 @@ Studio silently keeps the old screens. You must bump all three, every build:
   2. customizations.xml <AppVersion>   (new ISO  YYYY-MM-DDThh:mm:ssZ)
   3. customizations.xml sienaVersion   (YYYYMMDDThhmmssZ-<clientver>, keep the suffix)
 
-This script does all three off "now" (UTC), preserving the existing sienaVersion
-client-version suffix, then re-zips with the correct FLAT structure (no parent folder,
-Workflows/ included when present).
+This script does all three off "now" in LOCAL time (not UTC), preserving the existing
+sienaVersion client-version suffix, then re-zips with the correct FLAT structure (no
+parent folder, Workflows/ included when present).
+
+WHY LOCAL, NOT UTC: Power Apps Studio stamps <AppVersion> with the user's *local*
+wall-clock time but appends a literal `Z` (it is NOT actually UTC), and the maker-portal
+solution dashboard displays the stamp at face value with no timezone conversion. If you
+stamp genuine UTC here, the value is hours ahead of local and the dashboard shows the app
+"updated in the future" on import. Stamping local-now (with the `Z` suffix) matches Studio
+and reads correctly. Run the build on a machine set to the tenant/user's timezone.
 
 Usage:
   python3 bump_and_repack.py <work_dir> --version 0.0.0.18 --out dist/App_0_0_0_18.zip
@@ -32,8 +39,10 @@ from pathlib import Path
 
 
 def now_stamps():
-    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
-    app_version = now.strftime("%Y-%m-%dT%H:%M:%SZ")        # 2026-05-30T03:00:00Z
+    # LOCAL time + literal "Z" — matches Studio's stamp convention so the maker-portal
+    # dashboard doesn't show the app "updated in the future". See module docstring.
+    now = dt.datetime.now().replace(microsecond=0)
+    app_version = now.strftime("%Y-%m-%dT%H:%M:%SZ")        # 2026-05-30T03:00:00Z (local, Z suffix)
     siena_ts = now.strftime("%Y%m%dT%H%M%SZ")               # 20260530T030000Z
     return app_version, siena_ts
 

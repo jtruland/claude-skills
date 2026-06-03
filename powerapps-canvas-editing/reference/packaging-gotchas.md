@@ -51,8 +51,17 @@ The three, all in the wrapper (no msapp edit needed for the bump itself):
 The `.msapp`'s internal `Header.json` `DocVersion` is **not** the gate; you do not need to touch
 it to make a new build import.
 
-`bump_and_repack.py` finds and rewrites all three, deriving the timestamps from "now" (UTC) and
-preserving the existing `sienaVersion` client-version suffix.
+⚠️ **Stamp `<AppVersion>`/`sienaVersion` in LOCAL time, not UTC.** Studio writes the user's
+**local** wall-clock with a literal `Z` (it is *not* really UTC), and the maker-portal solution
+dashboard shows the stamp **at face value, no timezone conversion**. Stamp genuine UTC (e.g.
+`date -u`, or `datetime.now(timezone.utc)`) and the value is hours ahead of local → the dashboard
+shows the app **"updated in the future"** on import, and an Eastern user's stamp can even land on
+the wrong calendar day. Use local-now with the `Z` suffix, and run the build on a machine set to
+the tenant/user's timezone. (`bump_and_repack.py` uses `datetime.now()` local for exactly this.)
+
+`bump_and_repack.py` finds and rewrites all three, deriving the timestamps from **local** "now"
+(with the `Z` suffix, matching Studio) and preserving the existing `sienaVersion` client-version
+suffix.
 
 ---
 
