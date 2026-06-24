@@ -5,9 +5,10 @@ description: >
   as importable solution .zip files, entirely offline with the pac CLI — no tenant
   connection. Use this when asked to fix or add screens/controls/Power Fx in a Power
   Platform canvas app, repackage a solution, or debug why a re-imported app "didn't
-  change" or shows blank/empty screens in Studio. Covers the non-obvious traps:
-  three-stamp version bumping, gallery Layout, searchable ComboBox SearchItems,
-  %RESERVED% enum tokens, and the ConnectionReferences import gate.
+  change" or shows blank/empty screens in Studio, or why a SharePoint choice column keeps
+  reverting to its default after a Patch/save. Covers the non-obvious traps: three-stamp version
+  bumping, gallery Layout, searchable ComboBox SearchItems, %RESERVED% enum tokens, the
+  ConnectionReferences import gate, and SharePoint choice-column default revert-on-Patch.
 ---
 
 # Editing Power Apps Canvas Solutions (offline, pac CLI)
@@ -222,6 +223,25 @@ every right-anchored control, so:
   `X/Y/Width/Height`, flag `x+w>canvasW`, `y+h>canvasH`, foreground overlaps) before import —
   the only pre-render check. It can't see `Visible`-gated overlaps, gallery-internal relative
   layout, or in-control text wrapping; those still need a Studio/Preview eyeball.
+
+### 11. A SharePoint choice column's configured default silently reverts unwritten Patches
+A SharePoint list **Choice** column that has a **configured default value** re-applies that
+default on **every** `Patch` that doesn't explicitly write the column — including an update to a
+record that already holds a *different* choice. So an item set to `"B"` snaps back to the default
+`"A"` the next time you `Patch` it for any **other** field, with no error. It reads like a binding
+or state bug but is the list column's default doing exactly what it's configured to do.
+
+Two rules, in order of preference:
+
+1. **Prefer setting the default in the app/flow, not on the list column.** Author the default in
+   your `Patch`/`Defaults()`/form `DefaultMode`, or in the Power Automate flow, and leave the
+   SharePoint column with **no configured default**. A column default is not a free "initial
+   value" — it is an "always-on unless overridden on every write" value, so only configure one
+   when that revert-on-every-write behavior is **specifically** what the column is meant to do.
+2. **If the column must keep a configured default,** every `Patch` to that item must **explicitly
+   set the choice** — to its *existing* value when unchanged, not only on the writes that change
+   it. Read-modify-write the choice (e.g. include `'Status': {Value: gblExisting.Status.Value}`)
+   on **every** write path; omit it and the unwritten column reverts to the default.
 
 ## Bundled helpers (`scripts/`)
 
