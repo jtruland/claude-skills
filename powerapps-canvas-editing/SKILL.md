@@ -6,9 +6,11 @@ description: >
   connection. Use this when asked to fix or add screens/controls/Power Fx in a Power
   Platform canvas app, repackage a solution, or debug why a re-imported app "didn't
   change" or shows blank/empty screens in Studio, or why a SharePoint choice column keeps
-  reverting to its default after a Patch/save. Covers the non-obvious traps: three-stamp version
-  bumping, gallery Layout, searchable ComboBox SearchItems, %RESERVED% enum tokens, the
-  ConnectionReferences import gate, and SharePoint choice-column default revert-on-Patch.
+  reverting to its default after a Patch/save, or why a Power Automate flow errors "The workflow
+  parameter ... is not found" when referencing an environment variable. Covers the non-obvious
+  traps: three-stamp version bumping, gallery Layout, searchable ComboBox SearchItems, %RESERVED%
+  enum tokens, the ConnectionReferences import gate, SharePoint choice-column default
+  revert-on-Patch, and environment-variable references in flows.
 ---
 
 # Editing Power Apps Canvas Solutions (offline, pac CLI)
@@ -242,6 +244,33 @@ Two rules, in order of preference:
    set the choice** — to its *existing* value when unchanged, not only on the writes that change
    it. Read-modify-write the choice (e.g. include `'Status': {Value: gblExisting.Status.Value}`)
    on **every** write path; omit it and the unwritten column reverts to the default.
+
+### 12. An environment variable in a Power Automate flow must be inserted via the picker — its parameter name is `Display Name (schema_name)`
+
+When a solution flow needs a **solution environment variable's** value (e.g. an API key in an HTTP
+action header), insert it by **selecting it from _Add dynamic content → Environment variables →
+\<Display Name\>_** — never by hand-typing a `parameters(...)` expression. Selecting it does two
+things a typed expression does not: it **registers the variable as a workflow parameter** in the
+flow's `definition.parameters` (which otherwise holds only `$authentication` + `$connections`), and
+it writes the correct reference token for you.
+
+The token you cannot guess: the picker registers the parameter under the **combined
+`\<Display Name\> (\<schema_name\>)`** label — space and parentheses included. So an env var with
+display name `My_API_Key` and schema name `prefix_My_API_Key` is referenced as
+**`@{parameters('My_API_Key (prefix_My_API_Key)')}`** — *not* `parameters('My_API_Key')` and *not*
+`parameters('prefix_My_API_Key')`. Both bare forms fail at **run time** (the offline pack/import is
+clean — this only shows when the flow runs):
+
+> Unable to process template language expressions … **The workflow parameter '\<name\>' is not found.**
+
+The error is identical whether you typed the display name or the prefixed schema name — the real
+cause is the **missing parameter declaration** plus the non-obvious combined name.
+
+**Fix:** delete the typed expression and re-insert the env var from the dynamic-content picker; it
+overwrites the bad token with the correct combined-label one. **Fallback** if the env var doesn't
+surface in dynamic content for that field: add an **Initialize variable** (String), set its *Value*
+by picking the env var from dynamic content (which registers it), then reference `@{variables('…')}`
+everywhere you need the value.
 
 ## Bundled helpers (`scripts/`)
 
