@@ -27,8 +27,24 @@ doesn't change or renders blank).
 ## What you need
 
 - **`pac` CLI** (Power Platform CLI). Verify with `pac help`. Version pinned in our
-  environment is **1.34.4** (later Linux builds shipped a broken nupkg). No login is
-  required for `pac canvas pack` / `unpack` — they are pure local file operations.
+  environment is **1.34.4**. No login is required for `pac canvas pack` / `unpack` —
+  they are pure local file operations.
+
+  ⚠️ **Why 1.34.4, and why it matters to this skill.** The pin used to be recorded
+  as "later Linux builds shipped a broken nupkg". That is **false** — measured
+  against real containers 2026-08-04. pac 1.45+ targets .NET 9 and 2.0+ targets
+  .NET 10; an image with only the .NET 8 SDK reports the missing framework asset as
+  `Settings file 'DotnetToolSettings.xml' was not found in the package`, which names
+  the packaging instead of the framework floor. Given a newer SDK, 2.10.1 installs
+  and runs fine.
+
+  The **real** reason to hold is this skill itself. Newer pac deprecates the
+  `Experimental` source layout in favour of `SourceCode`, which makes **`*.pa.yaml`
+  the primary source** — the exact inverse of the rule the section below is built
+  on. Upgrading therefore invalidates every trap documented here until each is
+  retested against the new packer, including the `#`/`PA3003` bug in §7 (which an
+  upgrade plausibly fixes). Treat a pac upgrade as a scoped migration of this
+  skill, not a version bump.
 - **`python3` + `pyyaml`** if you use the bundled `pa_to_fx.py` converter.
 - **`zip`** for repackaging (or use the bundled `bump_and_repack.py`).
 
