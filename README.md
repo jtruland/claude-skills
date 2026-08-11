@@ -11,6 +11,7 @@ this repo is intended to **be** that directory (or be symlinked into it).
 | Skill | What it does |
 |---|---|
 | [`powerapps-canvas-editing`](powerapps-canvas-editing/) | Edit Microsoft Power Apps **canvas** apps as source (`.fx.yaml` / `.pa.yaml`) and ship them as importable solution `.zip` files, entirely offline with the `pac` CLI — no tenant connection. Covers the non-obvious traps: three-stamp version bumping, gallery Layout, searchable ComboBox `SearchItems`, `%RESERVED%` enum tokens, and the `ConnectionReferences` import gate. |
+| [`build-recipe-format`](build-recipe-format/) | Write or restructure a **step-by-step build recipe** for something assembled by hand in a GUI (a Power Automate flow, a canvas screen, a list schema). Four techniques do most of the work — lead with a structure tree, collapse N-way repeats into a table, extract every expression to its own block, name a repeated sub-expression once — plus a script that proves a templated rewrite is lossless instead of assuming it. |
 
 ## Install
 
