@@ -9,7 +9,7 @@ description: >
   reverting to its default after a Patch/save, or why a Power Automate flow errors "The workflow
   parameter ... is not found" when referencing an environment variable. Covers the non-obvious
   traps: three-stamp version bumping, gallery Layout, searchable ComboBox SearchItems, %RESERVED%
-  enum tokens, the ConnectionReferences import gate, SharePoint choice-column default
+  enum tokens, the ConnectionReferences import gate, required columns blocking an Update item, SharePoint choice-column default
   revert-on-Patch, and environment-variable references in flows.
 ---
 
@@ -249,6 +249,14 @@ record that already holds a *different* choice. So an item set to `"B"` snaps ba
 `"A"` the next time you `Patch` it for any **other** field, with no error. It reads like a binding
 or state bug but is the list column's default doing exactly what it's configured to do.
 
+**Before calling any partial write a trap-#11 defect, check whether the column actually has a
+default.** The trap needs a *configured* default; a Choice column without one is left untouched by
+an omitted write, and a partial `Patch`/`Update item` against it is correct as authored. A flow or
+formula alone cannot tell you which — the **list schema is the deciding evidence**, and a mature
+project usually records it (look for a schema reference doc before opening SharePoint). Well-designed
+lists often carry **no** Choice defaults precisely so partial updates stay safe — reading that as an
+oversight and "fixing" it is a real and easy mistake, and it manufactures work that changes nothing.
+
 Two rules, in order of preference:
 
 1. **Prefer setting the default in the app/flow, not on the list column.** Author the default in
@@ -287,6 +295,34 @@ overwrites the bad token with the correct combined-label one. **Fallback** if th
 surface in dynamic content for that field: add an **Initialize variable** (String), set its *Value*
 by picking the env var from dynamic content (which registers it), then reference `@{variables('…')}`
 everywhere you need the value.
+
+### 13. A required column blocks the action until you give it a value — write the existing one back
+
+A SharePoint column marked **Required** is mandatory in the connector's **Create item** *and*
+**Update item** forms. An `Update item` that means to change one field still cannot be saved until
+every required column has a value, so a "touch one column" write is rarely as small as it looks.
+
+The value for a column you are not changing is **the row's own current value, read back from the
+loop item or lookup you already have**:
+
+```
+Exception_Key   @{items('ForEach_StampNotified')?['Exception_Key']}
+Last_Notified   @{utcNow()}
+```
+
+Two consequences worth knowing:
+
+- **Don't mistake it for sloppiness.** An `Update item` carrying fields it plainly doesn't change is
+  usually satisfying required columns, not writing carelessly. Read it as the minimum the connector
+  permits before "simplifying" it.
+- **A recipe must state a value for every required field.** Otherwise the builder reaches a
+  mandatory box the document never mentions, and invents something — see the `build-recipe-format`
+  skill, which makes this an authoring rule.
+
+⚠️ Distinct from trap #11, and they pull in opposite directions: #11 is about columns you may omit
+but must not (a *configured default* silently re-applies), #13 is about columns you **cannot** omit
+at all. Neither implies the other — a required column need not have a default, and a defaulted
+column need not be required.
 
 ## Bundled helpers (`scripts/`)
 
