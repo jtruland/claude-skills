@@ -226,6 +226,23 @@ and keep the other app's msapp **byte-identical** (verify with md5). Isolate the
 — a lazy `<CanvasApp>.*?Name.*?</CanvasApp>` silently spans into the next block and edits the
 wrong app.
 
+⚠️ **A `count=1` substitution is NOT a safe stand-in for scoping.** It edits the *first*
+`<CanvasApp>` block, and block order is **export order** — not the order you have in mind. Measured
+on a real two-app solution: the app being changed was second, so a `count=1` bump stamped the other
+one. The changed app kept its old version (import "succeeds", Studio shows the old screens) *and*
+the untouched app got republished over what was live. Both failures are silent.
+
+**`bump_and_repack.py` takes `--app <name>`** (substring of the block's `<Name>`), scopes both
+customizations stamps to that block, and prints which apps it left alone. With 2+ apps present and
+no `--app` it **refuses to run** and lists the names rather than guessing:
+
+```
+python3 bump_and_repack.py <work_dir> --version 0.0.0.19 --app adminapp --out out.zip
+```
+
+Verify after every multi-app build: the other app's msapp md5 **and** its `AppVersion`/`sienaVersion`
+are unchanged, and the target app's `AppVersion` is **strictly greater** than the previous build's.
+
 ### 10. Layout: design for the device + anchor to `App.Width`/`App.Height`
 Pick the canvas size for the **target device** up front (`CanvasManifest.json`
 `DocumentLayoutWidth/Height`; desktop apps → `1920×1080`). Changing it later means rebasing
