@@ -5,3 +5,11 @@ __pycache__/
 # Editor / OS cruft
 .DS_Store
 *.swp
+
+# Third-party skills that live in this directory but are deliberately NOT ours.
+# This repo is PUBLIC and exists to make Jon's own skills portable; vendoring
+# someone else's occasional-use skill into it buys nothing and implies authorship.
+# They stay installed locally and simply are not tracked — so a `??` here is the
+# expected state, not work someone forgot to commit.
+grill-me/
+handoff/
